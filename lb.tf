@@ -6,17 +6,21 @@ module "vcn" {
   region                  = var.region
   create_internet_gateway = true
   vcn_cidrs               = var.vcn_cidrs
+  count                   = var.create_vcn ? 1 : 0
 
 }
 locals {
   dhcp_default_options = data.oci_core_dhcp_options.dhcp_options.options.0.id
+  vcn_id               = var.create_vcn ? module.vcn[0].vcn_id : var.vcn_id
+  ig_route_id          = var.create_vcn ? module.vcn[0].ig_route_id : var.ig_route_id
+  nat_route_id         = var.create_vcn ? module.vcn[0].nat_route_id : var.nat_route_id
 }
 
 resource "oci_core_subnet" "vcn_subnet" {
   for_each       = length(var.subnets) > 0 ? var.subnets : {}
   cidr_block     = each.value.cidr_block
   compartment_id = var.compartment_id
-  vcn_id         = module.vcn.vcn_id
+  vcn_id         = local.vcn_id
 
 
   dhcp_options_id = local.dhcp_default_options
@@ -25,14 +29,14 @@ resource "oci_core_subnet" "vcn_subnet" {
   freeform_tags   = lookup(each.value, "tags", null)
 
   prohibit_public_ip_on_vnic = lookup(each.value, "type", "public") == "public" ? false : true
-  route_table_id             = lookup(each.value, "type", "public") == "public" ? module.vcn.ig_route_id : module.vcn.nat_route_id
+  route_table_id             = lookup(each.value, "type", "public") == "public" ? local.ig_route_id : local.nat_route_id
   security_list_ids          = null
 }
 
 data "oci_core_dhcp_options" "dhcp_options" {
 
   compartment_id = var.compartment_id
-  vcn_id         = module.vcn.vcn_id
+  vcn_id         = local.vcn_id
 }
 
 resource "oci_load_balancer_load_balancer" "app_load_balancer" {
@@ -50,7 +54,7 @@ resource "oci_load_balancer_load_balancer" "app_load_balancer" {
   network_security_group_ids = [oci_core_network_security_group.public_lb_nsg.id]
 
   dynamic "reserved_ips" {
-    for_each = lookup(each.value, "reserved_ip", null) != null ? [oci_core_public_ip.reserved_ip[each.key].id] : []
+    for_each = lookup(each.value, "reserved_ip", false) != false ? [oci_core_public_ip.reserved_ip[each.key].id] : []
     content {
 
       id = reserved_ips.value
@@ -93,7 +97,7 @@ locals {
 resource "oci_core_network_security_group" "public_lb_nsg" {
 
   compartment_id = var.compartment_id
-  vcn_id         = module.vcn.vcn_id
+  vcn_id         = local.vcn_id
   display_name   = "Public_lb"
 
 }
